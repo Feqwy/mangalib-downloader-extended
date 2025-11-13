@@ -16,6 +16,8 @@ class Config:
     request_delay: float = 0.03
     fallback_volume_range: Tuple[int, int] = (1, 15)
     cleanup_temp: bool = True
+    pack_cbz: bool = True
+    generate_metadata: bool = True
     api_base: str = "https://api.cdnlibs.org/api/manga"
     image_host: str = "https://img3.mixlib.me"
     referer: str = "https://mangalib.me/"

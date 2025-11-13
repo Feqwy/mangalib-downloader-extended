@@ -19,13 +19,18 @@ def prompt_user_config() -> Config:
 
     title_override = input("Название манги (Enter — оставить по умолчанию): ").strip() or None
 
-    # Можно добавить дополнительные параметры
     try:
         max_chapters = int(input("Максимум одновременно загружаемых глав (по умолчанию 1): ") or "1")
         max_images = int(input("Максимум одновременно загружаемых изображений (по умолчанию 5): ") or "5")
         delay = float(input("Задержка между запросами (по умолчанию 0.8): ") or "0.8")
     except ValueError:
         max_chapters, max_images, delay = 1, 5, 0.8
+
+    pack_cbz_input = input("Собирать CBZ архивы? (y/n, по умолчанию y): ").strip().lower()
+    pack_cbz = pack_cbz_input != "n"
+
+    generate_metadata_input = input("Создавать ComicInfo/series.json? (y/n, по умолчанию y): ").strip().lower()
+    generate_metadata = generate_metadata_input != "n"
 
     cfg = Config(
         manga_slug=manga_slug,
@@ -36,7 +41,9 @@ def prompt_user_config() -> Config:
         max_concurrent_images=max_images,
         request_delay=delay,
         output_dir=Path("downloads"),
-        cleanup_temp=True
+        cleanup_temp=True,
+        pack_cbz=pack_cbz,
+        generate_metadata=generate_metadata
     )
 
     return cfg

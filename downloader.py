@@ -154,11 +154,17 @@ class ChapterDownloader:
             "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
         }
 
-        comicinfo_xml = self.metadata_gen.create_chapter_comicinfo(info)
+        if self.cfg.generate_metadata:
+            comicinfo_xml = self.metadata_gen.create_chapter_comicinfo(info)
+        else:
+            comicinfo_xml = b""
+
 
         with zipfile.ZipFile(cbz_path, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("info.txt", json.dumps(meta, ensure_ascii=False, indent=2))
-            zf.writestr("ComicInfo.xml", comicinfo_xml)
+            
+            if comicinfo_xml:
+                zf.writestr("ComicInfo.xml", comicinfo_xml)
             
             for file in sorted(tmp_dir.iterdir()):
                 if file.is_file():
@@ -250,24 +256,35 @@ class ChapterDownloader:
         for tmp_dir, info in successful:
             volume_groups[info.volume].append((tmp_dir, info))
 
+        sanitized_series = self.sanitize_filename(series_title)
+
+        # Если CBZ не собираем — создаём папку прямо в downloads/
+        if not self.cfg.pack_cbz:
+            series_folder = self.cfg.output_dir / sanitized_series
+            series_folder.mkdir(parents=True, exist_ok=True)
+
+            await self._download_series_cover(series_meta, series_folder, api)
+            self._create_series_metadata(series_folder, series_title, series_meta)
+            self._process_volumes(volume_groups, series_folder, series_title, series_meta)
+
+            print(Colors.success(f"Saved folder: {series_folder}"))
+            return series_folder
+
+        # Если CBZ собираем — используем временную папку и создаём ZIP
         temp_series_dir = self.cfg.output_dir / f"_tmp_series_{int(time.time())}"
         temp_series_dir.mkdir(parents=True, exist_ok=True)
 
-        sanitized_series = self.sanitize_filename(series_title)
         series_folder = temp_series_dir / sanitized_series
         series_folder.mkdir(exist_ok=True)
 
         await self._download_series_cover(series_meta, series_folder, api)
-
         self._create_series_metadata(series_folder, series_title, series_meta)
-
         self._process_volumes(volume_groups, series_folder, series_title, series_meta)
 
         zip_path = self._create_final_archive(temp_series_dir, sanitized_series)
-
         self._cleanup(successful, temp_series_dir)
-
         return zip_path
+
 
     async def _download_series_cover(self, series_meta: dict, series_folder: Path, api: MangaAPIClient):
         cover = series_meta.get("cover", {})
@@ -289,6 +306,9 @@ class ChapterDownloader:
 
     def _create_series_metadata(self, series_folder: Path, series_title: str, series_meta: dict):
         
+        if not self.cfg.generate_metadata:
+            return
+
         series_xml = self.metadata_gen.create_series_comicinfo(
             series_title, series_meta
         )
@@ -308,16 +328,28 @@ class ChapterDownloader:
             vol_folder = series_folder / sanitized_vol
             vol_folder.mkdir(exist_ok=True)
 
-            vol_xml = self.metadata_gen.create_volume_comicinfo(
-                volume, series_title, len(chapter_list), series_meta
-            )
-            (vol_folder / "ComicInfo.xml").write_bytes(vol_xml)
+            # Создаём ComicInfo.xml только если нужно
+            if self.cfg.generate_metadata:
+                vol_xml = self.metadata_gen.create_volume_comicinfo(
+                    volume, series_title, len(chapter_list), series_meta
+                )
+                (vol_folder / "ComicInfo.xml").write_bytes(vol_xml)
 
             for tmp_dir, info in chapter_list:
                 chap_name = f"Chapter {str(info.number).rstrip('0').rstrip('.')}"
                 sanitized_chap = self.sanitize_filename(chap_name)
-                cbz_path = vol_folder / f"{sanitized_chap}.cbz"
-                self.create_cbz(tmp_dir, info, cbz_path)
+                
+                if self.cfg.pack_cbz:
+                    cbz_path = vol_folder / f"{sanitized_chap}.cbz"
+                    self.create_cbz(tmp_dir, info, cbz_path)
+                else:
+                    # просто сохраняем изображения без упаковки
+                    target_folder = vol_folder / sanitized_chap
+                    target_folder.mkdir(exist_ok=True)
+                    for img_file in sorted(tmp_dir.iterdir()):
+                        if img_file.is_file():
+                            shutil.move(str(img_file), str(target_folder / img_file.name))
+
 
     def _create_final_archive(self, temp_series_dir: Path, sanitized_series: str) -> Path:
         zip_base = self.cfg.output_dir / sanitized_series
