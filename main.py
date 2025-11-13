@@ -16,7 +16,7 @@ async def main():
         # Параметры производительности
         max_concurrent_chapters=1,  # рекомендуется: 1–5
         max_concurrent_images=5,    # рекомендуется: 2–10
-        request_delay=0.1,          # задержка между запросами
+        request_delay=0.8,          # рекомендуется: 0.5-5
 
         # Дополнительные параметры
         output_dir=Path("downloads"),
