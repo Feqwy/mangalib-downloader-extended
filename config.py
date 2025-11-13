@@ -1,12 +1,13 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 
 @dataclass
 class Config:
     manga_slug: str
     chapter_range: Tuple[int, int]
+    extra_chapters: Optional[List[float]] = None  # поддержка дробных / дополнительных глав
     series_title_override: Optional[str] = None
     volume_override: Optional[int] = None
     output_dir: Path = Path("downloads")
@@ -18,4 +19,3 @@ class Config:
     api_base: str = "https://api.cdnlibs.org/api/manga"
     image_host: str = "https://img3.mixlib.me"
     referer: str = "https://mangalib.me/"
-    group_by_volume: bool = True

@@ -8,22 +8,20 @@ from downloader import ChapterDownloader
 async def main():
     # ========== КОНФИГУРАЦИЯ ==========
     cfg = Config(
-        manga_slug="114307--kaoru-hana-wa-rinto-saku", # https://mangalib.me/ru/manga/ВОТ ЗДЕСЬ БУДУТ ЦИФРЫ И НАЗВАНИЕ, СКОПИРОВАТЬ ДО ВОПРОСИТЕЛЬНОГО ЗНАКА ВКЛЮЧИТЕЛЬНО (если есть)
-        chapter_range=(54, 80),  # (начальная глава, конечная глава)
+        manga_slug="114307--kaoru-hana-wa-rinto-saku", #https://mangalib.me/ru/manga/ВОТ ЗДЕСЬ БУДУТ ЦИФРЫ И НАЗВАНИЕ, СКОПИРОВАТЬ ДО ВОПРОСИТЕЛЬНОГО ЗНАКА ВКЛЮЧИТЕЛЬНО (если есть)
+        chapter_range=(1, 2),  # (начальная глава, конечная глава)
+        extra_chapters=[],  # дополнительные главы, например 0.5 или 10.1
         series_title_override="Kaoru Hana Wa Rin To Saku",
         
         # Параметры производительности
-        max_concurrent_chapters=2,  # рекомендуется: 1-5
-        max_concurrent_images=3,    # рекомендуется: 2-10
-        request_delay=2,          # рекомендуется: 0.5-5
-        
+        max_concurrent_chapters=1,  # рекомендуется: 1–5
+        max_concurrent_images=5,    # рекомендуется: 2–10
+        request_delay=0.1,          # задержка между запросами
+
         # Дополнительные параметры
         output_dir=Path("downloads"),
         cleanup_temp=True,
-        fallback_volume_range=(1, 15),
-
-        # если False — НЕ распределять по томам (все главы в одной папке архива)
-        group_by_volume=False,
+        volume_override=None,
     )
     # ========== КОНФИГУРАЦИЯ ==========
 
