@@ -34,13 +34,14 @@ pip install -r requirements.txt
 ```python
 cfg = Config(
     manga_slug="114307--kaoru-hana-wa-rinto-saku",
-    chapter_range=(54, 80),  # диапазон глав
+    chapter_range=(1, 2),   # диапазон глав
+    extra_chapters=[],  # дополнительные главы (поддерживает дробные)
     series_title_override="Kaoru Hana Wa Rin To Saku",
-    
+
     # Параметры производительности
-    max_concurrent_chapters=3,  # 1-5
-    max_concurrent_images=3,    # 2-10
-    request_delay=0.5,          # 0.5-5 секунд
+    max_concurrent_chapters=1,  # 1-5
+    max_concurrent_images=5,    # 2-10
+    request_delay=0.5,
 )
 ```
 
@@ -55,6 +56,7 @@ python main.py
 
 - **manga_slug** - идентификатор манги из URL (например, `114307--kaoru-hana-wa-rinto-saku`)
 - **chapter_range** - диапазон глав для скачивания `(начало, конец)`
+- **extra_chapters** - дополнительные главы для скачивания
 - **series_title_override** - переопределение названия серии (опционально)
 
 ### Параметры производительности
@@ -68,7 +70,6 @@ python main.py
 - **volume_override** - принудительное указание тома (если автоопределение не работает)
 - **output_dir** - директория для сохранения файлов
 - **cleanup_temp** - удалять временные файлы после завершения
-- **fallback_volume_range** - диапазон томов для автоопределения
 
 ## Структура выходных файлов
 
@@ -96,10 +97,11 @@ downloads/
 ## Возможности
 
 - Асинхронное скачивание с контролем параллелизма
+- Поддержка **дробных глав и дополнительных `extra_chapters`**
 - Автоматическое определение томов
 - Обработка rate limits (429)
 - Повторные попытки при ошибках
-- Прогресс-бары для отслеживания
+- Прогресс-бары для глав и страниц
 - Метаданные для Komga/Mylar/Kavita
 - Цветной вывод в консоль
 - Модульная архитектура
