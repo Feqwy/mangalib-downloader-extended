@@ -25,7 +25,7 @@ jobs:
       run: pip install -r requirements.txt pyinstaller
 
     - name: Build executable
-      run: pyinstaller --onefile main.py
+      run: pyinstaller --onefile --collect-all PIL --hidden-import=PIL._imaging --name mangalib-downloader main.py
       shell: bash
 
     - name: Rename binary
