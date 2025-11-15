@@ -15,6 +15,21 @@ from models import ChapterInfo
 from api_client import MangaAPIClient
 from metadata import MetadataGenerator
 
+from PIL import Image
+import io
+
+
+def convert_gif_to_png(image_bytes: bytes) -> bytes:
+    """Convert GIF → PNG (fixes unreadable compressed GIFs)."""
+    img = Image.open(io.BytesIO(image_bytes))
+
+    if img.mode in ("P", "RGBA"):
+        img = img.convert("RGB")
+
+    output = io.BytesIO()
+    img.save(output, format="PNG")
+    return output.getvalue()
+
 
 class ChapterDownloader:
 
@@ -138,21 +153,45 @@ class ChapterDownloader:
             return self.cfg.series_title_override
 
         meta = await api.fetch_series_info(self.cfg.manga_slug)
-        raw_title = (meta.get("name") or meta.get("title") or 
-                    chapter_data.get("manga_id") or "Unknown")
+        raw_title = (
+            meta.get("name")
+            or meta.get("title")
+            or chapter_data.get("manga_id")
+            or "Unknown"
+        )
         return str(raw_title).strip()
 
-    async def _download_images(self, api: MangaAPIClient, urls: List[str], 
+    async def _download_images(self, api: MangaAPIClient, urls: List[str],
                                tmp_dir: Path, chapter_num: int):
         sem = asyncio.Semaphore(self.cfg.max_concurrent_images)
 
         async def download_task(idx: int, url: str):
             async with sem:
-                ext = Path(url).suffix or ".jpg"
-                filename = f"{idx:03d}{ext}"
-                await api.download_image(url, tmp_dir / filename)
+                try:
+                    image_bytes, content_type = await api.download_image_raw(url)
+                except Exception as e:
+                    print(Colors.error(f"Failed to download page {idx}: {e}"))
+                    return
+
+                ext = Path(url).suffix.lower() or ".jpg"
+
+                if "image/gif" in content_type:
+                    try:
+                        image_bytes = convert_gif_to_png(image_bytes)
+                        ext = ".png"
+                    except Exception as e:
+                        print(Colors.warning(f"GIF conversion failed for page {idx}: {e}"))
+                        # fallback: save original GIF
+
+                dest = tmp_dir / f"{idx:03d}{ext}"
+
+                try:
+                    dest.write_bytes(image_bytes)
+                except Exception as e:
+                    print(Colors.error(f"Failed to save page {idx}: {e}"))
 
         tasks = [download_task(i + 1, url) for i, url in enumerate(urls)]
+
         await async_tqdm.gather(
             *tasks, 
             desc=f"  Downloading Ch{chapter_num}", 
@@ -230,18 +269,20 @@ class ChapterDownloader:
         print(f"\n{Colors.BOLD}╔══════════════════════════════════════════╗{Colors.RESET}")
         print(f"{Colors.BOLD}║         MangaLib Downloader v2.0         ║{Colors.RESET}")
         print(f"{Colors.BOLD}╚══════════════════════════════════════════╝{Colors.RESET}")
-        
+
         series_info = self.cfg.series_title_override or f"{self.cfg.manga_slug} (from slug)"
         print(f"\n{Colors.info(f'Manga: {series_info}')}")
         print(f"{Colors.info(f'Chapters: {start}-{end} ({total} total)')}")
         print(f"{Colors.info(f'Concurrency: {self.cfg.max_concurrent_chapters} chapters, {self.cfg.max_concurrent_images} images')}\n")
 
     def _determine_series_title(self, series_meta: dict) -> str:
-        return (self.cfg.series_title_override or 
-                series_meta.get("name") or 
-                series_meta.get("rus_name") or 
-                series_meta.get("eng_name") or 
-                self.cfg.manga_slug)
+        return (
+            self.cfg.series_title_override
+            or series_meta.get("name")
+            or series_meta.get("rus_name")
+            or series_meta.get("eng_name")
+            or self.cfg.manga_slug
+        )
 
     async def _download_all_chapters(self, api: MangaAPIClient, chapters: List[int]) -> list:
         sem = asyncio.Semaphore(self.cfg.max_concurrent_chapters)

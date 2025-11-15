@@ -222,6 +222,20 @@ class MangaAPIClient:
 
         raise ValueError(f"Could not determine volume for chapter {chapter_num}")
 
+    # возвращает байты + content-type
+    async def download_image_raw(self, url: str):
+        headers = {
+            **self._headers,
+            "Referer": self.cfg.referer,
+            "Origin": self.cfg.referer.rstrip("/")
+        }
+
+        async with self._session.get(url, headers=headers, timeout=60) as resp:
+            resp.raise_for_status()
+            data = await resp.read()
+            content_type = resp.headers.get("Content-Type", "").lower()
+            return data, content_type
+
     async def download_image(self, url: str, dest: Path, retries: int = 10):
         headers = {
             **self._headers,
