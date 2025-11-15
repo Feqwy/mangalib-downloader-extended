@@ -42,7 +42,7 @@ jobs:
       run: |
         VERSION="${GITHUB_REF#refs/tags/}"
         if [[ "${{ runner.os }}" == "Windows" ]]; then
-          zip "MangaLibDownloader_${VERSION}_windows.zip" mangalib-downloader.exe
+          powershell Compress-Archive -Path mangalib-downloader.exe -DestinationPath "MangaLibDownloader_${VERSION}_windows.zip"
         else
           zip "MangaLibDownloader_${VERSION}_linux.zip" mangalib-downloader
         fi
