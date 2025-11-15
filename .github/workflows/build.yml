@@ -1,0 +1,73 @@
+name: Build Releases
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+
+    - name: Install dependencies
+      run: pip install -r requirements.txt pyinstaller
+
+    - name: Build executable
+      run: |
+        pyinstaller --onefile main.py
+      shell: bash
+
+    - name: Rename binary
+      run: |
+        if [[ "${{ runner.os }}" == "Windows" ]]; then
+          mv dist/main.exe mangalib-downloader.exe
+        else
+          mv dist/main mangalib-downloader
+          chmod +x mangalib-downloader
+        fi
+      shell: bash
+
+    - name: Create ZIP archive
+      run: |
+        VERSION="${GITHUB_REF#refs/tags/}"
+        if [[ "${{ runner.os }}" == "Windows" ]]; then
+          zip "MangaLibDownloader_${VERSION}_windows.zip" mangalib-downloader.exe
+        else
+          zip "MangaLibDownloader_${VERSION}_linux.zip" mangalib-downloader
+        fi
+      shell: bash
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: release-${{ runner.os }}
+        path: MangaLibDownloader_*.zip
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+    - name: Download artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: artifacts
+
+    - name: Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: artifacts/**/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
