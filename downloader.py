@@ -17,6 +17,25 @@ from metadata import MetadataGenerator
 
 
 class ChapterDownloader:
+
+    @staticmethod
+    def _format_chapter_number(num):
+        """
+        Корректно форматирует номер главы:
+        - целые → 0, 1, 20
+        - дробные → 0.5, 10.1, 12.5
+        Убирает только ненужные нули в конце.
+        """
+        try:
+            f = float(num)
+            if f.is_integer():
+                return str(int(f))
+            s = str(f).rstrip("0").rstrip(".")
+            return s
+        except Exception:
+            return str(num)
+
+
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self.metadata_gen = MetadataGenerator(cfg)
@@ -45,7 +64,7 @@ class ChapterDownloader:
         return host + path
 
     @staticmethod
-    def clean_chapter_name(name: str) -> str:
+    def clean_chapter_name(name: str) -> str:  
         name = re.sub(r'\s*\([^)]*\d[^)]*\)', '', name).strip()
         name = re.sub(r'\d+', '', name).strip()
         return name
@@ -173,12 +192,11 @@ class ChapterDownloader:
     async def download_chapters(self, chapter_range: Tuple[int, int]) -> List[Path]:
         start, end = chapter_range
         chapters = list(range(start, end + 1))
-                # Добавляем дополнительные главы, если указаны
+
         if getattr(self.cfg, "extra_chapters", None):
             print(Colors.info(f"Adding extra chapters: {self.cfg.extra_chapters}"))
             chapters.extend(self.cfg.extra_chapters)
 
-        # Убираем дубли и сортируем
         chapters = sorted(set(chapters))
 
         self._print_header(start, end, len(chapters))
@@ -258,7 +276,6 @@ class ChapterDownloader:
 
         sanitized_series = self.sanitize_filename(series_title)
 
-        # Если CBZ не собираем — создаём папку прямо в downloads/
         if not self.cfg.pack_cbz:
             series_folder = self.cfg.output_dir / sanitized_series
             series_folder.mkdir(parents=True, exist_ok=True)
@@ -270,7 +287,6 @@ class ChapterDownloader:
             print(Colors.success(f"Saved folder: {series_folder}"))
             return series_folder
 
-        # Если CBZ собираем — используем временную папку и создаём ZIP
         temp_series_dir = self.cfg.output_dir / f"_tmp_series_{int(time.time())}"
         temp_series_dir.mkdir(parents=True, exist_ok=True)
 
@@ -328,7 +344,6 @@ class ChapterDownloader:
             vol_folder = series_folder / sanitized_vol
             vol_folder.mkdir(exist_ok=True)
 
-            # Создаём ComicInfo.xml только если нужно
             if self.cfg.generate_metadata:
                 vol_xml = self.metadata_gen.create_volume_comicinfo(
                     volume, series_title, len(chapter_list), series_meta
@@ -336,14 +351,15 @@ class ChapterDownloader:
                 (vol_folder / "ComicInfo.xml").write_bytes(vol_xml)
 
             for tmp_dir, info in chapter_list:
-                chap_name = f"Chapter {str(info.number).rstrip('0').rstrip('.')}"
+
+                chap_str = ChapterDownloader._format_chapter_number(info.number)
+                chap_name = f"Chapter {chap_str}"
                 sanitized_chap = self.sanitize_filename(chap_name)
                 
                 if self.cfg.pack_cbz:
                     cbz_path = vol_folder / f"{sanitized_chap}.cbz"
                     self.create_cbz(tmp_dir, info, cbz_path)
                 else:
-                    # просто сохраняем изображения без упаковки
                     target_folder = vol_folder / sanitized_chap
                     target_folder.mkdir(exist_ok=True)
                     for img_file in sorted(tmp_dir.iterdir()):
