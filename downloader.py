@@ -319,6 +319,12 @@ class ChapterDownloader:
         start, end = chapter_range
         chapters = list(range(start, end + 1))
 
+        if getattr(self.cfg, "extra_chapters", None):
+            print(Colors.info(f"Adding extra chapters: {self.cfg.extra_chapters}"))
+            chapters.extend(self.cfg.extra_chapters)
+            
+        chapters = sorted(set(chapters), key=float)
+
         async with MangaAPIClient(self.cfg) as api:
             self._print_header(start, end, len(chapters))
             results = await self._download_all_chapters(api, chapters)
