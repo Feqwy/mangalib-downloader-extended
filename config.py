@@ -21,3 +21,4 @@ class Config:
     api_base: str = "https://api.cdnlibs.org/api/manga"
     image_host: str = "https://img3.mixlib.me"
     referer: str = "https://mangalib.me/"
+    auth_token: Optional[str] = None

@@ -8,8 +8,38 @@ def prompt_user_config() -> Config:
     print("=== MangaLib Downloader Config ===\n")
 
     manga_url = input("Введите ссылку на мангу: ").strip()
-    # Извлекаем slug из ссылки, например "https://mangalib.me/114307--kaoru-hana-wa-rinto-saku"
-    manga_slug = manga_url.split("/")[-1].split("?")[0]
+    # Извлекаем slug из ссылки
+    # Пример: https://mangalib.me/title-slug?section=... -> title-slug
+    try:
+        manga_slug = manga_url.split("/")[-1].split("?")[0]
+        if not manga_slug: # Если ссылка оканчивается на слэш
+            manga_slug = manga_url.split("/")[-2]
+    except IndexError:
+        print("Некорректная ссылка, используется slug по умолчанию")
+        manga_slug = "unknown"
+
+    # --- ЛОГИКА ОПРЕДЕЛЕНИЯ САЙТА ---
+    is_slash = "v2.shlib.life" in manga_url
+    
+    if is_slash:
+        print("\n[!] Обнаружена ссылка на SlashLib.")
+        default_api = "https://hapi.hentaicdn.org/api/manga"
+        default_image_host = "https://img3.mixlib.me"
+        default_referer = "https://v2.shlib.life/"
+        
+        # Запрос токена
+        print("Для этого API может потребоваться Bearer Token (из Cookies или LocalStorage).")
+        auth_token = input("Введите Bearer Token (или Enter, чтобы попробовать без него): ").strip() or None
+    else:
+        default_api = "https://api.cdnlibs.org/api/manga"
+        default_image_host = "https://img3.mixlib.me"
+        default_referer = "https://mangalib.me/"
+        auth_token = None
+
+    # -------------------------------
+
+    print(f"\nAPI URL: {default_api}")
+    print(f"Slug: {manga_slug}\n")
 
     start = int(input("Введите начальную главу: ").strip() or "1")
     end = int(input("Введите конечную главу: ").strip() or str(start))
@@ -19,12 +49,13 @@ def prompt_user_config() -> Config:
 
     title_override = input("Название манги (Enter — оставить по умолчанию): ").strip() or None
 
+    # Настройки загрузки
     try:
         max_chapters = int(input("Максимум одновременно загружаемых глав (по умолчанию 1): ") or "1")
         max_images = int(input("Максимум одновременно загружаемых изображений (по умолчанию 5): ") or "5")
-        delay = float(input("Задержка между запросами (по умолчанию 0.8): ") or "0.8")
+        delay = float(input("Задержка между запросами (по умолчанию 0.5): ") or "0.5")
     except ValueError:
-        max_chapters, max_images, delay = 1, 5, 0.8
+        max_chapters, max_images, delay = 1, 5, 0.5
 
     pack_cbz_input = input("Собирать CBZ архивы? (y/n, по умолчанию y): ").strip().lower()
     pack_cbz = pack_cbz_input != "n"
@@ -43,7 +74,12 @@ def prompt_user_config() -> Config:
         output_dir=Path("downloads"),
         cleanup_temp=True,
         pack_cbz=pack_cbz,
-        generate_metadata=generate_metadata
+        generate_metadata=generate_metadata,
+        # Динамические параметры API
+        api_base=default_api,
+        image_host=default_image_host,
+        referer=default_referer,
+        auth_token=auth_token
     )
 
     return cfg
@@ -56,4 +92,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nЗагрузка прервана пользователем.")

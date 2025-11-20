@@ -1,10 +1,11 @@
 import asyncio
 import aiohttp
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Union, Tuple # Добавлены Union и Tuple
 
 from config import Config
 from colors import Colors
+from models import ChapterInfo
 
 
 class MangaAPIClient:
@@ -12,16 +13,25 @@ class MangaAPIClient:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self._session: Optional[aiohttp.ClientSession] = None
-        self._chapters_map: Dict[str, Dict[float, int]] = {}
+        # Кэшированные структуры
+        self._chapters_map: Dict[str, Dict[float, int | float]] = {}
         self._series_cache: Dict[str, Dict[str, Any]] = {}
+        self._full_pool_cache: Dict[str, List[Dict[str, Any]]] = {} # Кэш для всех сырых данных глав
         self._headers = {
             "User-Agent": "Mozilla/5.0 (iPad; CPU OS 18_6_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/142.0.7444.46 Mobile/15E148 Safari/604.1",
             "Accept": "*/*",
-            "Accept-Language": "en-US,en;q=0.9"
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": self.cfg.referer, # Используем реферер из конфига
+            "Origin": self.cfg.referer.rstrip("/")
         }
+
+        # Добавляем Bearer Token, если он есть
+        if self.cfg.auth_token:
+            self._headers["Authorization"] = f"Bearer {self.cfg.auth_token}"
 
     async def __aenter__(self):
         conn = aiohttp.TCPConnector(limit=self.cfg.max_concurrent_images * 2)
+        # Создаем сессию сразу с нужными хедерами
         self._session = aiohttp.ClientSession(connector=conn, headers=self._headers)
         await self._warm_up_session()
         return self
@@ -31,11 +41,88 @@ class MangaAPIClient:
             await self._session.close()
 
     async def _warm_up_session(self):
+        # Делаем легкий запрос к рефереру, чтобы прогреть соединение
         try:
             async with self._session.get(self.cfg.referer, timeout=6):
                 pass
         except Exception:
             pass
+
+    @staticmethod
+    def _parse_chapter_number(number: Any) -> Optional[Union[int, float]]:
+        if number is None: return None
+        try: return int(number)
+        except ValueError:
+            try: return float(str(number).replace(',', '.'))
+            except (ValueError, TypeError): return None
+
+    async def fetch_full_chapter_pool(self, slug: str) -> List[Dict[str, Any]]:
+        if slug in self._full_pool_cache:
+            return self._full_pool_cache[slug]
+
+        # Используем api_base из конфига
+        url = f"{self.cfg.api_base}/{slug}/chapters"
+        try:
+            data = await self._get_json(url, retries=4) 
+            items = data.get("data", []) if isinstance(data, dict) else []
+            self._full_pool_cache[slug] = items
+            return items
+        except Exception as e:
+            print(Colors.error(f"Не удалось получить список глав: {e}"))
+            return []
+
+    async def to_chapter_info_list(
+        self,
+        slug: str,
+        start_num: float,
+        end_num: float,
+        extra: List[float]
+    ) -> List[ChapterInfo]:
+        full_data = await self.fetch_full_chapter_pool(slug)
+        
+        chapter_info_list: List[ChapterInfo] = []
+        chapters_to_include = set(extra) 
+        
+        for index, item in enumerate(full_data):
+            raw_number = item.get("number") # Получаем сырое значение
+            number = self._parse_chapter_number(raw_number) # Преобразуем во float
+            
+            volume_raw = item.get("volume")
+            volume = 0
+            try: volume = int(volume_raw)
+            except (ValueError, TypeError): pass
+
+            if number is None: continue
+
+            # Сравниваем числа (float)
+            if start_num <= number <= end_num:
+                chapters_to_include.add(number)
+            
+            if number in chapters_to_include:
+                info = ChapterInfo(
+                    number=number,     # Число (для сортировки)
+                    number_str=str(raw_number), # Сохраняем строку для запроса
+                    index=index, 
+                    volume=volume, 
+                    name=item.get("name") or "",
+                    pages_count=item.get("pages_count", 0),
+                    series_title=None,
+                    teams=item.get("teams", []),
+                    chapter_id=item.get("id"),
+                )
+                
+                if not any(ch.number == info.number for ch in chapter_info_list):
+                    chapter_info_list.append(info)
+                    chapters_to_include.discard(number)
+        
+        final_list = sorted(chapter_info_list, key=lambda ch: ch.number)
+        
+        if chapters_to_include:
+             print(Colors.warning(
+                 f"Пропущены дополнительные главы: {list(chapters_to_include)}"
+             ))
+             
+        return final_list
 
     async def _get_json(self, url: str, params: Optional[Dict[str, Any]] = None, 
                        retries: int = 5) -> Dict[str, Any]:
@@ -150,9 +237,11 @@ class MangaAPIClient:
         self._series_cache[slug] = result
         return result
 
-    async def fetch_chapter_data(self, slug: str, chapter_num: int, 
+    # Тип chapter_num теперь включает str
+    async def fetch_chapter_data(self, slug: str, chapter_num: Union[int, float, str], 
                                  volume: int) -> Dict[str, Any]:
         url = f"{self.cfg.api_base}/{slug}/chapter"
+        # API получит string, если мы его передадим
         return await self._get_json(
             url,
             params={"number": chapter_num, "volume": volume},

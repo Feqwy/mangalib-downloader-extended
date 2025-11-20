@@ -1,10 +1,12 @@
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import Optional, List, Union
 
 
 @dataclass
 class ChapterInfo:
-    number: int
+    number: Union[int, float]  # теперь поддерживает дробные главы
+    number_str: str
+    index: int                 # порядковый номер главы в серии
     volume: int
     name: str
     pages_count: int
