@@ -1,7 +1,8 @@
 import asyncio
 import aiohttp
+import random
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Union, Tuple # Добавлены Union и Tuple
+from typing import Optional, Dict, Any, List, Union, Tuple
 
 from config import Config
 from colors import Colors
@@ -50,11 +51,15 @@ class MangaAPIClient:
 
     @staticmethod
     def _parse_chapter_number(number: Any) -> Optional[Union[int, float]]:
-        if number is None: return None
-        try: return int(number)
+        if number is None:
+            return None
+        try:
+            return int(number)
         except ValueError:
-            try: return float(str(number).replace(',', '.'))
-            except (ValueError, TypeError): return None
+            try:
+                return float(str(number).replace(',', '.'))
+            except (ValueError, TypeError):
+                return None
 
     async def fetch_full_chapter_pool(self, slug: str) -> List[Dict[str, Any]]:
         if slug in self._full_pool_cache:
@@ -89,15 +94,18 @@ class MangaAPIClient:
             
             volume_raw = item.get("volume")
             volume = 0
-            try: volume = int(volume_raw)
-            except (ValueError, TypeError): pass
+            try:
+                volume = int(volume_raw)
+            except (ValueError, TypeError):
+                pass
 
-            if number is None: continue
+            if number is None:
+                continue
 
             # Сравниваем числа (float)
             if start_num <= number <= end_num:
                 chapters_to_include.add(number)
-            
+
             if number in chapters_to_include:
                 info = ChapterInfo(
                     number=number,     # Число (для сортировки)
@@ -110,22 +118,26 @@ class MangaAPIClient:
                     teams=item.get("teams", []),
                     chapter_id=item.get("id"),
                 )
-                
+
                 if not any(ch.number == info.number for ch in chapter_info_list):
                     chapter_info_list.append(info)
                     chapters_to_include.discard(number)
-        
+
         final_list = sorted(chapter_info_list, key=lambda ch: ch.number)
-        
+
         if chapters_to_include:
-             print(Colors.warning(
-                 f"Пропущены дополнительные главы: {list(chapters_to_include)}"
-             ))
-             
+            print(Colors.warning(
+                f"Пропущены дополнительные главы: {list(chapters_to_include)}"
+            ))
+
         return final_list
 
     async def _get_json(self, url: str, params: Optional[Dict[str, Any]] = None, 
                        retries: int = 5) -> Dict[str, Any]:
+        """
+        Простая/надёжная реализация получения JSON с обработкой 429.
+        Взято из рабочей старой версии: делает retry с учётом Retry-After и экспоненциальным backoff.
+        """
         for attempt in range(retries):
             try:
                 async with self._session.get(url, params=params, timeout=30) as resp:
@@ -144,7 +156,7 @@ class MangaAPIClient:
                     return data
 
             except aiohttp.ClientResponseError as e:
-                if e.status == 429:
+                if getattr(e, "status", None) == 429:
                     wait = self._calculate_retry_delay({}, attempt)
                     print(Colors.warning(
                         f"Rate limit (429) via exception. Retry in {wait:.2f}s... "
@@ -166,10 +178,26 @@ class MangaAPIClient:
 
     @staticmethod
     def _calculate_retry_delay(headers: Dict[str, str], attempt: int) -> float:
+        """
+        Возвращает задержку в секундах с учётом заголовка Retry-After (если есть),
+        иначе экспоненциальный бэкофф с небольшим джиттером.
+        """
         retry_after = headers.get("Retry-After")
-        if retry_after and retry_after.isdigit():
-            return float(retry_after) + 1.0
-        return min(2 ** attempt, 60) + 0.1 * attempt
+        if retry_after:
+            # Retry-After может быть числом секунд или HTTP-date — в простом случае пытаемся int
+            try:
+                # если в заголовке число — используем его
+                sec = int(float(retry_after))
+                return float(sec) + 1.0
+            except Exception:
+                # если не число — fallback на экспоненцию
+                pass
+
+        # базовый экспоненциальный backoff
+        base = min(2 ** attempt, 60)
+        # небольшой случайный джиттер
+        jitter = random.uniform(0.3, 1.3)
+        return base + 0.1 * attempt + jitter
 
     @staticmethod
     def _parse_float(value: str) -> Optional[float]:
@@ -195,7 +223,7 @@ class MangaAPIClient:
             for item in items:
                 chapter_num = item.get("number")
                 volume_num = item.get("volume")
-                
+
                 if chapter_num is None or volume_num is None:
                     continue
 
@@ -219,15 +247,15 @@ class MangaAPIClient:
 
         url = f"{self.cfg.api_base}/{slug}"
         fields = [
-            "background", "eng_name", "otherNames", "summary", "releaseDate", 
-            "type_id", "caution", "views", "close_view", "rate_avg", "rate", 
-            "genres", "tags", "teams", "user", "franchise", "authors", "publisher", 
-            "userRating", "moderated", "metadata", "metadata.count", 
-            "metadata.close_comments", "manga_status_id", "chap_count", 
+            "background", "eng_name", "otherNames", "summary", "releaseDate",
+            "type_id", "caution", "views", "close_view", "rate_avg", "rate",
+            "genres", "tags", "teams", "user", "franchise", "authors", "publisher",
+            "userRating", "moderated", "metadata", "metadata.count",
+            "metadata.close_comments", "manga_status_id", "chap_count",
             "status_id", "artists", "format"
         ]
         params = {f"fields[]": field for field in fields}
-        
+
         try:
             data = await self._get_json(url, params=params, retries=3)
             result = data.get("data", {}) if isinstance(data, dict) else {}
@@ -238,7 +266,7 @@ class MangaAPIClient:
         return result
 
     # Тип chapter_num теперь включает str
-    async def fetch_chapter_data(self, slug: str, chapter_num: Union[int, float, str], 
+    async def fetch_chapter_data(self, slug: str, chapter_num: Union[int, float, str],
                                  volume: int) -> Dict[str, Any]:
         url = f"{self.cfg.api_base}/{slug}/chapter"
         # API получит string, если мы его передадим
@@ -260,7 +288,7 @@ class MangaAPIClient:
 
         series_info = await self.fetch_series_info(slug)
         detected_volume = self._search_volume_in_metadata(series_info, target_chapter)
-        
+
         if detected_volume is not None:
             try:
                 await self.fetch_chapter_data(slug, chapter_num, detected_volume)
@@ -276,7 +304,7 @@ class MangaAPIClient:
             if isinstance(obj, dict):
                 num = obj.get("number") or obj.get("chapter_number")
                 vol = obj.get("volume")
-                
+
                 if num is not None and vol is not None:
                     chapter_float = self._parse_float(str(num))
                     if chapter_float == target_chapter:
@@ -284,7 +312,7 @@ class MangaAPIClient:
                             return int(vol)
                         except (ValueError, TypeError):
                             pass
-                
+
                 for value in obj.values():
                     result = search(value)
                     if result is not None:
@@ -300,7 +328,7 @@ class MangaAPIClient:
 
     async def _bruteforce_volume(self, slug: str, chapter_num: int) -> int:
         start, end = self.cfg.fallback_volume_range
-        
+
         for volume in range(start, end + 1):
             try:
                 await asyncio.sleep(0.12)
@@ -311,21 +339,12 @@ class MangaAPIClient:
 
         raise ValueError(f"Could not determine volume for chapter {chapter_num}")
 
-    # возвращает байты + content-type
-    async def download_image_raw(self, url: str):
-        headers = {
-            **self._headers,
-            "Referer": self.cfg.referer,
-            "Origin": self.cfg.referer.rstrip("/")
-        }
-
-        async with self._session.get(url, headers=headers, timeout=60) as resp:
-            resp.raise_for_status()
-            data = await resp.read()
-            content_type = resp.headers.get("Content-Type", "").lower()
-            return data, content_type
-
     async def download_image(self, url: str, dest: Path, retries: int = 10):
+        """
+        Простая/рабочая реализация скачивания изображения с повторными попытками
+        и обработкой 429/403, аналогичная старой рабочей версии.
+        Записывает файл по пути dest.
+        """
         headers = {
             **self._headers,
             "Referer": self.cfg.referer,
@@ -355,7 +374,7 @@ class MangaAPIClient:
 
                     resp.raise_for_status()
                     data = await resp.read()
-                    
+
                     if not data:
                         raise RuntimeError("Empty response")
 
@@ -363,6 +382,13 @@ class MangaAPIClient:
                     dest.write_bytes(data)
                     await asyncio.sleep(self.cfg.request_delay)
                     return
+
+            except aiohttp.ClientResponseError as e:
+                # Если ошибка HTTP и последний заход — пробрасываем
+                if attempt == retries - 1:
+                    print(Colors.error(f"Image download failed after {retries} attempts: {e}"))
+                    raise
+                await asyncio.sleep(0.2 * (attempt + 1))
 
             except Exception as e:
                 if attempt == retries - 1:

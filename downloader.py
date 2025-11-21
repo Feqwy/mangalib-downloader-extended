@@ -32,13 +32,16 @@ def convert_gif_to_png(image_bytes: bytes) -> bytes:
 class ChapterDownloader:
     @staticmethod
     def _format_chapter_number(num: Union[int, float, str]) -> str:
-        if isinstance(num, str): return num
+        if isinstance(num, str):
+            return num
         try:
             f = float(num)
-            if f.is_integer(): return str(int(f))
+            if f.is_integer():
+                return str(int(f))
             s = str(f).rstrip("0").rstrip(".")
             return s
-        except Exception: return str(num)
+        except Exception:
+            return str(num)
 
     def __init__(self, cfg: Config):
         self.cfg = cfg
@@ -93,10 +96,10 @@ class ChapterDownloader:
         print(Colors.info(f"Найдено глав для загрузки (после проверки API): {len(chapters)}"))
         return chapters
 
-    async def download_chapters(self, chapter_range: Tuple[int, int]):
-        start, end = chapter_range
+    async def download_chapters(self):
+        start, end = self.cfg.chapter_range
         self._print_header(start, end)
-        
+
         async with MangaAPIClient(self.cfg) as api:
             try:
                 chapters_to_download = await self._resolve_chapter_list(api)
@@ -113,7 +116,7 @@ class ChapterDownloader:
             results = await self._download_all_chapters(api, chapters_to_download)
 
             successful, failed_count = self._process_results(chapters_to_download, results)
-            
+
             if not successful:
                 print(Colors.error("No chapters downloaded successfully"))
                 return []
@@ -129,18 +132,18 @@ class ChapterDownloader:
         Скачивает главу. Принимает ChapterInfo (предпочтительно) или число.
         """
         tmp_dir = None
-        
+
         # Извлекаем данные из переданного объекта
         if isinstance(chapter_item, ChapterInfo):
             chapter_num = chapter_item.number
             req_number = getattr(chapter_item, "number_str", chapter_num)
             volume = chapter_item.volume
-            chapter_index = chapter_item.index # Берем индекс из объекта
+            chapter_index = chapter_item.index  # Берем индекс из объекта
         else:
             chapter_num = chapter_item
-            req_number = chapter_item # Fallback
+            req_number = chapter_item  # Fallback
             volume = None
-            chapter_index = 0 # Fallback, если передано просто число
+            chapter_index = 0  # Fallback, если передано просто число
 
         try:
             # Если том неизвестен
@@ -179,7 +182,12 @@ class ChapterDownloader:
             if not urls:
                 raise ValueError("No valid image URLs found")
 
-            await self._download_images(api, urls, target_dir, req_number)
+            download_success = await self._download_images(api, urls, target_dir, req_number)
+
+            if not download_success:
+                # Если хотя бы одно изображение не скачалось (например, из-за 429),
+                # вызываем ошибку, чтобы перейти в блок 'except' и вернуть None.
+                raise RuntimeError("Failed to download all required images.")
 
             teams = [t.get("name", "") for t in data.get("teams", []) if isinstance(t, dict)]
 
@@ -203,38 +211,47 @@ class ChapterDownloader:
             try:
                 if tmp_dir and tmp_dir.exists():
                     shutil.rmtree(tmp_dir, ignore_errors=True)
-            except Exception: pass
+            except Exception:
+                pass
             return None
 
-    async def _download_images(self, api: MangaAPIClient, urls: List[str], chapter_dir: Path, chapter_num: Union[int, float, str]):
+    async def _download_images(self, api: MangaAPIClient, urls: List[str], chapter_dir: Path, chapter_num: Union[int, float, str]) -> bool:
         sem = asyncio.Semaphore(self.cfg.max_concurrent_images)
-        async def download_task(idx: int, url: str):
+
+        async def download_task(idx: int, url: str) -> bool:
             async with sem:
-                try:
-                    image_bytes, content_type = await api.download_image_raw(url)
-                except Exception as e:
-                    print(Colors.error(f"Failed to download page {idx} for Ch{chapter_num}: {e}"))
-                    return
                 ext = Path(url).suffix.lower() or ".jpg"
-                if "image/gif" in content_type:
-                    try: image_bytes = convert_gif_to_png(image_bytes); ext = ".png"
-                    except Exception: pass
                 dest = chapter_dir / f"{idx:03d}{ext}"
                 try:
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    dest.write_bytes(image_bytes)
+                    # api.download_image поднимет исключение, если 429 не удалось обойти
+                    await api.download_image(url, dest)
                 except Exception as e:
-                    print(Colors.error(f"Failed to save page {idx}: {e}"))
+                    print(Colors.error(f"Failed to download page {idx} for Ch{chapter_num}: {e}"))
+                    return False
+
+                # Сохранение прошло внутри api.download_image
+                return True
 
         tasks = [download_task(i + 1, url) for i, url in enumerate(urls)]
         # tqdm wrapper для параллельных задач
-        await async_tqdm.gather(*tasks, desc=f"  Downloading Ch{chapter_num}", unit="img")
+        results = await async_tqdm.gather(*tasks, desc=f"  Downloading Ch{chapter_num}", unit="img")
+
+        # Проверка результатов на наличие хотя бы одного False
+        failed_downloads = sum(1 for res in results if res is not True)
+
+        if failed_downloads > 0:
+            print(Colors.error(f"Chapter {chapter_num} failed to download {failed_downloads}/{len(urls)} images."))
+            return False
+
+        return True
 
     async def _download_all_chapters(self, api: MangaAPIClient, chapters: List[Union[ChapterInfo, int]]) -> list:
         sem = asyncio.Semaphore(self.cfg.max_concurrent_chapters)
+
         async def limited(ch):
             async with sem:
                 return await self.download_chapter(api, ch)
+
         return await asyncio.gather(*[limited(ch) for ch in chapters], return_exceptions=True)
 
     def create_cbz(self, src_dir: Path, info: ChapterInfo, cbz_path: Path):
@@ -262,7 +279,8 @@ class ChapterDownloader:
                 try:
                     vol_xml = self.metadata_gen.create_volume_comicinfo(volume, series_title, len(chapter_list), series_meta)
                     (vol_folder / "ComicInfo.xml").write_bytes(vol_xml)
-                except Exception: pass
+                except Exception:
+                    pass
             for dir_path, info in chapter_list:
                 chap_str = info.number_str if hasattr(info, "number_str") else ChapterDownloader._format_chapter_number(info.number)
                 sanitized_chap = self.sanitize_filename(f"Chapter {chap_str}")
@@ -271,25 +289,31 @@ class ChapterDownloader:
                     cbz_path = vol_folder / f"{sanitized_chap}.cbz"
                     self.create_cbz(dir_path, info, cbz_path)
                     try:
-                        if dir_path.exists(): shutil.rmtree(dir_path, ignore_errors=True)
-                    except: pass
+                        if dir_path.exists():
+                            shutil.rmtree(dir_path, ignore_errors=True)
+                    except:
+                        pass
                 else:
                     target_folder = vol_folder / sanitized_chap
                     if dir_path.exists() and dir_path != target_folder:
-                        if target_folder.exists(): shutil.rmtree(target_folder)
+                        if target_folder.exists():
+                            shutil.rmtree(target_folder)
                         shutil.move(str(dir_path), str(target_folder))
 
     async def _get_series_title(self, api: MangaAPIClient, chapter_data: dict) -> str:
-        if self.cfg.series_title_override: return self.cfg.series_title_override
+        if self.cfg.series_title_override:
+            return self.cfg.series_title_override
         series_block = chapter_data.get("series") or {}
         if isinstance(series_block, dict):
             name = series_block.get("name") or series_block.get("rus_name") or series_block.get("eng_name")
-            if name: return name
+            if name:
+                return name
         try:
             series_meta = await api.fetch_series_info(self.cfg.manga_slug)
-            return (series_meta.get("name") or series_meta.get("rus_name") or 
+            return (series_meta.get("name") or series_meta.get("rus_name") or
                     series_meta.get("eng_name") or self.cfg.manga_slug)
-        except: return self.cfg.manga_slug
+        except:
+            return self.cfg.manga_slug
 
     def _process_results(self, chapters: List[Any], results: list) -> Tuple[list, int]:
         successful = []
@@ -304,7 +328,7 @@ class ChapterDownloader:
         return successful, failed_count
 
     def _determine_series_title(self, series_meta: dict) -> str:
-        return (self.cfg.series_title_override or series_meta.get("name") or 
+        return (self.cfg.series_title_override or series_meta.get("name") or
                 series_meta.get("rus_name") or series_meta.get("eng_name") or self.cfg.manga_slug)
 
     async def _download_series_cover(self, series_meta: dict, series_folder: Path, api: MangaAPIClient):
@@ -314,7 +338,11 @@ class ChapterDownloader:
             try:
                 data, _ = await api.download_image_raw(cover_url)
                 (series_folder / "cover.jpg").write_bytes(data)
-            except: pass
+            except Exception:
+                try:
+                    await api.download_image(cover_url, series_folder / "cover.jpg")
+                except Exception:
+                    pass
 
     def _create_series_metadata(self, series_folder: Path, series_title: str, series_meta: dict):
         if self.cfg.generate_metadata:
@@ -323,7 +351,8 @@ class ChapterDownloader:
                 (series_folder / "series.json").write_text(series_json, encoding="utf-8")
                 series_xml = self.metadata_gen.create_series_comicinfo(series_title, series_meta)
                 (series_folder / "ComicInfo.xml").write_bytes(series_xml)
-            except: pass
+            except:
+                pass
 
     async def _create_series_archive(self, successful: list, series_title: str, series_meta: dict) -> Optional[Path]:
         sanitized_series = self.sanitize_filename(series_title)
@@ -360,7 +389,8 @@ class ChapterDownloader:
 
     def _cleanup(self, successful: list, temp_series_dir: Path):
         if self.cfg.cleanup_temp:
-            if temp_series_dir.exists(): shutil.rmtree(temp_series_dir, ignore_errors=True)
+            if temp_series_dir.exists():
+                shutil.rmtree(temp_series_dir, ignore_errors=True)
 
     def _print_header(self, start: int, end: int):
         print(f"\n{Colors.BOLD}╔══════════════════════════════════════════╗{Colors.RESET}")
@@ -370,12 +400,13 @@ class ChapterDownloader:
         print(f"\n{Colors.info(f'Manga: {series_info}')}")
         print(f"{Colors.info(f'Requested Chapters: {start}-{end}')}")
         if self.cfg.extra_chapters:
-             print(f"{Colors.info(f'Extra Chapters: {self.cfg.extra_chapters}')}")
+            print(f"{Colors.info(f'Extra Chapters: {self.cfg.extra_chapters}')}")
         print(f"{Colors.info(f'Concurrency: {self.cfg.max_concurrent_chapters} chapters, {self.cfg.max_concurrent_images} images')}\n")
 
     def _print_summary(self, successful: int, total: int, failed: int):
         print(f"\n{Colors.BOLD}{'═' * 50}{Colors.RESET}")
         print(Colors.success(f"Completed: {successful}/{total} chapters"))
-        if failed: print(Colors.info(f"Failed: {failed} chapters"))
+        if failed:
+            print(Colors.info(f"Failed: {failed} chapters"))
         print(Colors.info(f"Output directory: {self.cfg.output_dir.absolute()}"))
         print(f"{Colors.BOLD}{'═' * 50}{Colors.RESET}\n")

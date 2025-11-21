@@ -88,7 +88,7 @@ def prompt_user_config() -> Config:
 async def main():
     cfg = prompt_user_config()
     downloader = ChapterDownloader(cfg)
-    await downloader.download_chapters(cfg.chapter_range)
+    await downloader.download_chapters()
 
 
 if __name__ == "__main__":
