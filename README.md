@@ -1,4 +1,4 @@
-### !!!
+# !!!
 [Этот проект заморожен, новый с обновлённыеми функциями](https://github.com/Feqwy/Lib-downloader).
 
 # MangaLib Downloader
