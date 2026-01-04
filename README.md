@@ -1,3 +1,6 @@
+### !!!
+[Этот проект заморожен, новый с обновлённыеми функциями](https://github.com/Feqwy/Lib-downloader).
+
 # MangaLib Downloader
 
 Асинхронный загрузчик манги с Lib сайтов с поддержкой метаданных для Komga/Mylar.
